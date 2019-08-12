@@ -1,0 +1,19 @@
+{
+  "name": "automaton-element",
+  "version": "0.0.1",
+  "description": "automaton-element",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AutomatonSystems/automaton-element.git"
+  },
+  "author": "Simon Baldwin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/AutomatonSystems/automaton-element/issues"
+  },
+  "homepage": "https://github.com/AutomatonSystems/automaton-element#readme"
+}
