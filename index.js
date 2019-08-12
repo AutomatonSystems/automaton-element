@@ -27,11 +27,11 @@ let UUID = 0;
 //TODO formalize struture and add 'types'
 const bindPrefix = "_";
 let bindings = {};
+bindings[bindPrefix+"for"] = "for"; // for LOOOPs
 bindings[bindPrefix] = "value";
 bindings[bindPrefix+"body"] = "innerHTML";
-bindings[bindPrefix+"for"] = "for"; // for LOOOPs
 bindings[bindPrefix+"show"] = "show"; // show
-for(let attr of ["selected", "value", "min", "max", "innerHTML", "onclick"]){
+for(let attr of ["selected", "value", "min", "max", "innerHTML", "onclick", "style"]){
 	bindings[bindPrefix+attr] = attr;
 }
 
@@ -172,6 +172,10 @@ class BasicComponent extends HTMLElement{
 				let dataItem = valueName.replace(/\$(?=\w)/g, "this.data.");
 				dataItem = dataItem.replace(/\#(?=\w)/g, `document.querySelector('#${this.id}').`);
 
+				//console.log(dataItem);
+
+				ele.removeAttribute(bind);
+
 				// LOOPING FUNCTIONAL
 				if(attr=="for"){
 					let template = ele.innerHTML;
@@ -179,11 +183,18 @@ class BasicComponent extends HTMLElement{
 					let arrayLocation = as[1].trim();
 					let item = as[0].trim();
 
-					let buildArray = ()=>{
+					let arrayFunction = new Function("try{return " + arrayLocation +"}catch{return []}");
+					let count = 0;
+
+					let buildArray = ()=>{						
+						// grab the array
+						let array = arrayFunction.call(this);
+						if(count==array.length)
+							return;
+						count = array.length;
 						// clear old content
 						ele.innerHTML = "";
-						// grab the array
-						let array = new Function("try{return " + arrayLocation +"}catch{return []}").call(this);
+						// TODO DESTROY OLD BINDINGS!
 						// itterate
 						for(let key of Object.keys(array)){
 							// build a temporary wrapper for the markup
