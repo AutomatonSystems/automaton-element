@@ -26,13 +26,19 @@ let UUID = 0;
 
 //TODO formalize struture and add 'types'
 const bindPrefix = "_";
-let bindings = {};
-bindings[bindPrefix+"for"] = "for"; // for LOOOPs
-bindings[bindPrefix] = "value";
-bindings[bindPrefix+"body"] = "innerHTML";
-bindings[bindPrefix+"show"] = "show"; // show
-for(let attr of ["selected", "value", "min", "max", "innerHTML", "onclick", "style"]){
-	bindings[bindPrefix+attr] = attr;
+let BIND_ATTRIBUTES = {};
+
+// _for="item:$items"
+BIND_ATTRIBUTES[bindPrefix+"for"] = "for"; // for LOOOPs
+
+BIND_ATTRIBUTES[bindPrefix] = "value";
+
+BIND_ATTRIBUTES[bindPrefix+"debugger"] = "debugger";
+BIND_ATTRIBUTES[bindPrefix+"body"] = "innerHTML";
+BIND_ATTRIBUTES[bindPrefix+"show"] = "show"; // show
+BIND_ATTRIBUTES[bindPrefix+"data"] = "data-data";
+for(let attr of ["selected", "value", "min", "max", "innerHTML", "onclick", "style", "src"]){
+	BIND_ATTRIBUTES[bindPrefix+attr] = attr;
 }
 
 function scriptLocal(){
@@ -47,22 +53,26 @@ function scriptLocal(){
 	return link;
 }
 
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+
 class BasicComponent extends HTMLElement{
 
 	#attached = false;
-	#bindings = [];
+	_bindings = {};
 	#ready = false;
 
 	#setupQueue = [];
 
 	meta;
 
-	constructor(data={}, meta = import.meta){
+	constructor(data={}, meta = import.meta, flags = {}){
 		super();
 
 		this.meta = meta;
 
 		this.id = "ui_"+UUID++;
+
+		this.bindingID = 0;
 
 		//TODO THE LOCATION STUFF IS CRAP
 		//console.log(`BUILDING ${meta.url}` + this.constructor.name);
@@ -78,19 +88,11 @@ class BasicComponent extends HTMLElement{
 			}
 		});
 
-		this.data = new Proxy(data, {
-			get: (obj, prop)=>{
-				return data[prop];
-			},
-			set: (obj, prop, value)=>{
-				data[prop] = value;
-				if(this.dataListener[prop]){
-					this.dataListener[prop]();
-				}
-				this.dataChange();
-				return true;
-			}
-		});
+		if(flags.json){
+			this.jsonData = data;
+		}else{
+			this.setData(data);
+		}
 
 		this.dataListener = {};
 
@@ -105,6 +107,61 @@ class BasicComponent extends HTMLElement{
 
 			this.#ready = true;
 		});
+	}
+
+	set jsonData(json){
+		this.data = this._proxyJsonModel(json);
+	}
+
+	setData(obj){
+		this.data = new Proxy(obj, {
+			get: (obj, prop)=>{
+				return obj[prop];
+			},
+			set: (obj, prop, value)=>{
+				if(obj[prop] != value){
+					obj[prop] = value;
+					if(this.dataListener[prop]){
+						this.dataListener[prop]();
+					}
+					this.dataChange();
+				}
+				return true;
+			}
+		});
+		this.dataChange();
+	}
+	_proxyJsonModel(localdata, path = []){
+		let model = new Proxy({}, {
+			get: (obj, prop)=>{
+				return obj[prop];
+			},
+			set: (obj, prop, value)=>{
+				/// proxy deep data
+				if(typeof value =='object')
+					value = this._proxyJsonModel(value,[...path, prop]);
+				else if(Array.isArray(value))
+					debugger;
+				
+				//assign the value
+				obj[prop] = value;
+
+				if(this.#ready){
+					let varpath = [...path,prop].join('.');
+					if(this.dataListener[varpath]){
+						this.dataListener[varpath]();
+					}
+					this.dataChange();
+				}
+
+				return true;
+			}
+		});
+		//copy data in
+		for(let key of Object.keys(localdata)){
+			model[key] = localdata[key];
+		}
+		return model;
 	}
 
 	interval(func, ms=250){
@@ -137,13 +194,23 @@ class BasicComponent extends HTMLElement{
 		return "";
 	}
 
+	addBinding(binding){
+		// first run
+		binding();
+		// add the binding for later runs
+		let bindId = this.bindingID++;
+		this._bindings[bindId] = binding;
+		return bindId;
+	}
+
 	bind(element = this, mappings = []){
 
+		let repeaterElements = [];
 
 		// grab all the stuff to process first
 		let stuffs = [];
-		for(let bind of Object.keys(bindings)){
-			let attr = bindings[bind];
+		for(let bind of Object.keys(BIND_ATTRIBUTES)){
+			let attr = BIND_ATTRIBUTES[bind];
 			let elements = element.querySelectorAll(`[${bind}]`);
 
 			if(elements.length){
@@ -161,7 +228,19 @@ class BasicComponent extends HTMLElement{
 		for(let stuff of stuffs){
 			let {bind, attr, elements} = stuff;
 			//console.log(attr);
+			elementLoop:
 			for(let ele of elements){
+
+				//check we aren't the child of a repeater Element, which are handled but recursed bind calls
+				for(let parent of repeaterElements){
+					let e = ele;
+					while(e.parentElement!=null){
+						e = e.parentElement;
+						if(e==parent){
+							continue elementLoop;						
+						}
+					}
+				}
 
 				let valueName = ele.getAttribute(bind);
 				// function to get the value of the desired data
@@ -176,21 +255,35 @@ class BasicComponent extends HTMLElement{
 
 				ele.removeAttribute(bind);
 
+				if(attr=="debugger"){
+					debugger;
+					console.log(dataItem, eval(dataItem));
+				}
+
 				// LOOPING FUNCTIONAL
 				if(attr=="for"){
+					repeaterElements.push(ele);
 					let template = ele.innerHTML;
 					let as = dataItem.split(":");
 					let arrayLocation = as[1].trim();
 					let item = as[0].trim();
 
-					let arrayFunction = new Function("try{return " + arrayLocation +"}catch{return []}");
+					
+
+					let arrayFunction = new AsyncFunction("try{return " + arrayLocation +"}catch(e){console.error(e);return []}");
 					let count = 0;
 
-					let buildArray = ()=>{						
+					let buildArray = async ()=>{
+						
+						let array = await arrayFunction.call(this);
 						// grab the array
-						let array = arrayFunction.call(this);
-						if(count==array.length)
-							return;
+						try{							
+							if(count==array.length)
+								return;
+						}catch(e){
+							debugger;
+						}
+
 						count = array.length;
 						// clear old content
 						ele.innerHTML = "";
@@ -201,19 +294,22 @@ class BasicComponent extends HTMLElement{
 							let wrapper = document.createElement("div");
 							wrapper.innerHTML = template;
 							// process the subtree
-							this.bind(wrapper, [[`\\$${item}`, `${arrayLocation}[${key}]`], ...mappings]);
+							this.bind(wrapper, [[`\\$${item}`, `(${arrayLocation})[${key}]`], ...mappings]);
 							// append it to parent
-							for(let node of wrapper.children) {
+							// create a copy of the array otherwise it'll live update as we move items
+							let children = [...wrapper.childNodes];
+							for(let node of children) {
 								ele.appendChild(node);
 							}
 						}
 					};
 
-					this.#bindings.push(()=>{
-						//console.log("array change callback");
+					this.addBinding(()=>{
+						
+						//DESTROY old bindings...
+
 						buildArray();
 					});
-
 					continue;
 				}
 
@@ -226,23 +322,47 @@ class BasicComponent extends HTMLElement{
 					continue;
 				}
 
-				let getFunc = new Function("try{return " + dataItem +"}catch{return ''}");
+			
+
+				// data bind 
+				if(attr == "data-data"){
+					let as = dataItem.split(":");
+					let arrayLocation = as[1].trim();
+					let item = as[0].trim();
+
+					let getFunc = new Function("try{return " + arrayLocation +"}catch{return ''}");
+
+					this.addBinding(()=>{
+						let value = getFunc.call(this);
+						if(value!=null) {
+							if(item==''){
+								ele.setData(value);
+							}else{
+								ele.data[item] = value;
+							}
+							//ele.dataset[item] = value;
+						}
+					});
+					continue;
+				}
+
+				let getFunc = new AsyncFunction("try{return " + dataItem +"}catch{return ''}");
 
 				// INPUTS (two way bind)
 				if(attr == "value"){
 					// setting value -> two way binding
 					let setFunc = new Function("v", dataItem + " = v;");
 					if(ele.type == "checkbox"){
-						this.#bindings.push(()=>{
-							ele.checked = getFunc.call(this);
+						this.addBinding(async ()=>{
+							ele.checked = await getFunc.call(this);
 						});
 
 						ele.addEventListener("change", ()=>{
 							setFunc.call(this, ele.checked);
 						});
 					}else{
-						this.#bindings.push(()=>{
-							ele.value = getFunc.call(this);
+						this.addBinding(async ()=>{
+							ele.value = await getFunc.call(this);
 						});
 
 						ele.addEventListener("change", ()=>{
@@ -253,8 +373,8 @@ class BasicComponent extends HTMLElement{
 				}
 
 				if(attr == "show"){
-					this.#bindings.push(()=>{
-						let value = getFunc.call(this);
+					this.addBinding(async ()=>{
+						let value = await getFunc.call(this);
 						if(!value) {
 							ele.style.display = "none";
 						} else {
@@ -267,8 +387,8 @@ class BasicComponent extends HTMLElement{
 				// BASIC ONE WAY BIND
 				{
 					// setting any other item -> one way binding
-					this.#bindings.push(()=>{
-						let value = getFunc.call(this);
+					this.addBinding(async ()=>{
+						let value = await getFunc.call(this);
 						if(value!=null) {
 							ele[attr] = value;
 						}
@@ -320,7 +440,7 @@ class BasicComponent extends HTMLElement{
 	}
 
 	dataChange(){
-		for(let binding of this.#bindings){
+		for(let binding of Object.values(this._bindings)){
 			binding();
 		}
 		this.triggerEvent("change");
@@ -333,8 +453,8 @@ class BasicComponent extends HTMLElement{
 _.css = (superc)=>{
 	return class extends superc{
 
-		constructor(data, meta){
-			super(data, meta);
+		constructor(data, meta, flags){
+			super(data, meta, flags);
 		}
 
 		async load(){
@@ -374,8 +494,8 @@ _.css = (superc)=>{
 _.html = (superc)=>{
 	return class extends superc{
 
-		constructor(data, meta){
-			super(data, meta);
+		constructor(data, meta, flags){
+			super(data, meta, flags);
 		}
 
 		async load(){
@@ -388,8 +508,7 @@ _.html = (superc)=>{
 						let f = await fetch(path);
 						this.constructor.html = await f.text();
 					}catch(e){
-						//console.error(e);
-						//typically a missing file is because it doesn't want to be styled
+						console.error("Failed to html " + this.constructor.name);
 					}
 					res();
 				});
