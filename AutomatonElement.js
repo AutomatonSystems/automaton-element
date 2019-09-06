@@ -1,5 +1,6 @@
 // used to prevent having to rebuild the class chain every component instance
 const CHAINED_CLASS_CACHE = {};
+const EXTENTION_REGISTRY = {};
 
 let _ = (...classes)=>{
 	let classKey = classes.join("|");
@@ -9,15 +10,18 @@ let _ = (...classes)=>{
 
 	let c = BasicComponent;
 	for(let clas of classes){
-		if(typeof clas == "string") {
-			c = _[clas.toLowerCase()](c);
-		} else {
-			c = clas(c);
-		}
+		c = EXTENTION_REGISTRY[clas](c);	
 	}
 	CHAINED_CLASS_CACHE[classKey] = c;
+
+	c.EXTENSION_DEPTH = classes.length;
+
 	return c;
 };
+
+_.registerExtension = (name, classFunction)=>{
+	EXTENTION_REGISTRY[name] = classFunction;
+}
 
 export default _;
 
@@ -41,18 +45,6 @@ for(let attr of ["selected", "value", "min", "max", "innerHTML", "onclick", "sty
 	BIND_ATTRIBUTES[bindPrefix+attr] = attr;
 }
 
-function scriptLocal(){
-	let err = new Error();
-	let link = err.stack.split("(");
-	link = link[1];
-	link = link.split(")")[0];
-	link = link.split(":");
-	link.splice(-2, 2);
-	link = link.join(":");
-
-	return link;
-}
-
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 
 class BasicComponent extends HTMLElement{
@@ -63,24 +55,22 @@ class BasicComponent extends HTMLElement{
 
 	#setupQueue = [];
 
-	meta;
-
-	constructor(data={}, meta = import.meta, flags = {}){
+	constructor(data={}, flags = {}){
 		super();
-
-		this.meta = meta;
+		
+		// resolve this classes file path for relative file resolution
+		if(this.baseUrl==null){
+			let parts = (new Error()).stack.split('\n');
+			let path = parts[2+ this.constructor.EXTENSION_DEPTH];
+			path = path.substring(path.indexOf('(')+1);
+			path = path.substring(0,path.indexOf(".js:"))+".js";
+			this.static.baseUrl = path;
+		}
 
 		this.id = "ui_"+UUID++;
 
 		this.bindingID = 0;
 
-		//TODO THE LOCATION STUFF IS CRAP
-		//console.log(`BUILDING ${meta.url}` + this.constructor.name);
-		//console.log(scriptLocal());
-
-		//TODO register on _
-
-		//debugging
 		let reservedFunctions = ["connectedCallback", "disconnectedCallback"];
 		reservedFunctions.forEach((func)=>{
 			if(new.target.prototype[func] != BasicComponent.prototype[func]){
@@ -99,7 +89,6 @@ class BasicComponent extends HTMLElement{
 		this.load();
 
 		Promise.all(this.#setupQueue).then(async ()=>{
-			//console.log("RENDERING " + this.constructor.name);
 			this.innerHTML = this.markup();
 			this.bind();
 			await this.init();
@@ -107,6 +96,17 @@ class BasicComponent extends HTMLElement{
 
 			this.#ready = true;
 		});
+	}
+
+	get static(){
+		if(this.constructor.static==null){
+			this.constructor.static = {};
+		}
+		return this.constructor.static;
+	}
+
+	get baseUrl(){
+		return this.static.baseUrl;
 	}
 
 	set jsonData(json){
@@ -231,19 +231,18 @@ class BasicComponent extends HTMLElement{
 			elementLoop:
 			for(let ele of elements){
 
-				//check we aren't the child of a repeater Element, which are handled but recursed bind calls
-				for(let parent of repeaterElements){
-					let e = ele;
-					while(e.parentElement!=null){
-						e = e.parentElement;
-						if(e==parent){
-							continue elementLoop;						
-						}
+				//check we aren't the child of a repeater Element, which are handled by recursed bind calls
+				let e = ele;
+				while(e.parentElement!=null){
+					e = e.parentElement;
+					if(repeaterElements.includes(e)){
+						continue elementLoop;
 					}
 				}
+				
 
+				// manipulate the input to replace tokens with relative data
 				let valueName = ele.getAttribute(bind);
-				// function to get the value of the desired data
 				for(let mapping of mappings){
 					let regexp = new RegExp(mapping[0], "g");
 					valueName = valueName.replace(regexp, mapping[1]);
@@ -253,8 +252,10 @@ class BasicComponent extends HTMLElement{
 
 				//console.log(dataItem);
 
+				// remove the attr from the markup
 				ele.removeAttribute(bind);
 
+				// DEBUG
 				if(attr=="debugger"){
 					debugger;
 					console.log(dataItem, eval(dataItem));
@@ -266,9 +267,7 @@ class BasicComponent extends HTMLElement{
 					let template = ele.innerHTML;
 					let as = dataItem.split(":");
 					let arrayLocation = as[1].trim();
-					let item = as[0].trim();
-
-					
+					let item = as[0].trim();					
 
 					let arrayFunction = new AsyncFunction("try{return " + arrayLocation +"}catch(e){console.error(e);return []}");
 					let count = 0;
@@ -450,11 +449,11 @@ class BasicComponent extends HTMLElement{
 
 /********** EXTENSIONS ********* */
 
-_.css = (superc)=>{
+_.registerExtension("css",(superc)=>{
 	return class extends superc{
 
-		constructor(data, meta, flags){
-			super(data, meta, flags);
+		constructor(data, flags){
+			super(data, flags);
 		}
 
 		async load(){
@@ -466,11 +465,11 @@ _.css = (superc)=>{
 		}
 
 		styleSheet(){
-			if(!this.constructor.css){
-				this.constructor.css = true;
+			if(!this.static.css){
+				this.static.css = true;
 				let p = new Promise(async (res, rej) => {
 					try{
-						let path = `${this.meta.url}/../${this.constructor.name}.css`;
+						let path = `${this.baseUrl}/../${this.constructor.name}.css`;
 						let f = await fetch(path);
 						let css = await f.text();
 						let style = document.createElement("style");
@@ -489,24 +488,24 @@ _.css = (superc)=>{
 			return false;
 		}
 	};
-};
+});
 
-_.html = (superc)=>{
+_.registerExtension("html", (superc)=>{
 	return class extends superc{
 
-		constructor(data, meta, flags){
-			super(data, meta, flags);
+		constructor(data, flags){
+			super(data, flags);
 		}
 
 		async load(){
 			super.load();
 
-			if(!this.constructor.html){
+			if(!this.static.html){
 				let p = new Promise(async (res, rej) => {
 					try{
-						let path = `${this.meta.url}/../${this.constructor.name}.html`;
+						let path = `${this.baseUrl}/../${this.constructor.name}.html`;
 						let f = await fetch(path);
-						this.constructor.html = await f.text();
+						this.static.html = await f.text();
 					}catch(e){
 						console.error("Failed to html " + this.constructor.name);
 					}
@@ -517,7 +516,7 @@ _.html = (superc)=>{
 		}
 
 		markup(){
-			return this.constructor.html;
+			return this.static.html;
 		}
 	};
-};
+});

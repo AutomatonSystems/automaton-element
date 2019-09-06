@@ -1,0 +1,41 @@
+{
+	"name":"Archer",
+	"type":"SPRITE",
+	"appearance":[
+		{
+			"pixel":["Archer","Archer2"],
+			"palette":["archer"]
+		}
+	],
+	"stats":{
+		"hp":160,
+		"regen": 2,
+
+		"move":{
+			"type": "SMART_WALK",
+			"speed":2.0,
+			"fall":3,
+			"jump":0,
+			"climb":2
+			}
+	},
+	"attack":{
+		"range": 12,
+		"buildup": 0.3,
+		"backswing": 0.1,
+		"cooldown": 0.5,
+		"impact": {
+			"damage":60
+		},
+		"projectile":"pArrow"
+	},
+	"traits":["FORMATION"],
+	"skill-tree":[
+		
+	],
+	"brain":{
+		"speed":0.5,
+		"type": "Brain",
+		"args":[]
+	}
+}
