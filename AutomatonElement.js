@@ -265,9 +265,13 @@ class BasicComponent extends HTMLElement{
 				if(attr=="for"){
 					repeaterElements.push(ele);
 					let template = ele.innerHTML;
-					let as = dataItem.split(":");
-					let arrayLocation = as[1].trim();
-					let item = as[0].trim();					
+					let forParts;
+					if(dataItem.includes(" of "))
+						forParts = dataItem.split(" of ");
+					else
+						forParts = dataItem.split(":");
+					let arrayLocation = forParts[1].trim();
+					let item = forParts[0].trim();					
 
 					let arrayFunction = new AsyncFunction("try{return " + arrayLocation +"}catch(e){console.error(e);return []}");
 					let count = 0;
