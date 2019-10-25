@@ -338,10 +338,14 @@ class BasicComponent extends HTMLElement{
 					this.addBinding(()=>{
 						let value = getFunc.call(this);
 						if(value!=null) {
-							if(item==''){
-								ele.setData(value);
+							if(ele.data == null){
+								console.error("Trying to set data on an element that doesn't appear to be a AutomatonElement; did you forget to load the js?");
 							}else{
-								ele.data[item] = value;
+								if(item==''){
+									ele.setData(value);
+								}else{
+									ele.data[item] = value;
+								}
 							}
 							//ele.dataset[item] = value;
 						}
